@@ -22,6 +22,7 @@ namespace
   constexpr UINT_PTR peekTimerId = 1;
   constexpr UINT_PTR refreshTimerId = 2;
   constexpr UINT_PTR manualRefreshTimerId = 3;
+  constexpr UINT_PTR cursorMovementTimerId = 4;
 
   const std::wstring alphabets = L"asdfghjklqwertyuiopzxcvbnm";
 
@@ -63,6 +64,11 @@ namespace
   HFONT hintFontLarge = nullptr;
   HFONT hintFontMedium = nullptr;
   HFONT hintFontSmall = nullptr;
+
+  bool leftHeld = false;
+  bool rightHeld = false;
+  bool upHeld = false;
+  bool downHeld = false;
 
   bool HasInterestingPattern(IUIAutomationElement *element){
     for(const auto &pattern : interestingPatterns){
@@ -332,64 +338,60 @@ namespace
 
 
   LRESULT CALLBACK ProcessKeyboardTransparent(int nCode, WPARAM wParam, LPARAM lParam){
-    if(nCode == HC_ACTION && hintModeActive && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)){
+    if(nCode == HC_ACTION && hintModeActive){
+
+      bool isKeyDown = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
+      bool isKeyUp = (wParam == WM_KEYUP || wParam == WM_SYSKEYUP);
       auto *info = reinterpret_cast<KBDLLHOOKSTRUCT *>(lParam);
       DWORD virtualKeycode = info->vkCode;
-      if(virtualKeycode == VK_ESCAPE){
-        HideOverlay(overlayHwnd);
-        return 1;
+      if(isKeyDown || isKeyUp){
+        bool *heldFlag = nullptr;
+        if(virtualKeycode == VK_LEFT)
+          heldFlag = &leftHeld;
+        if (virtualKeycode == VK_RIGHT)
+          heldFlag = &rightHeld;
+        if (virtualKeycode == VK_UP)
+          heldFlag = &upHeld;
+        if (virtualKeycode == VK_DOWN)
+          heldFlag = &downHeld;
+        if(heldFlag){
+          *heldFlag = isKeyDown;
+          if(isKeyDown){
+            SetTimer(overlayHwnd, cursorMovementTimerId, 16, nullptr);
+            return 1;
+          }
+        }
       }
-      if(virtualKeycode == VK_BACK){
-        if(!inputBuffer.empty()) inputBuffer.pop_back();
-        InvalidateRect(overlayHwnd, nullptr, FALSE);
-        return 1;
-      }
-      if(virtualKeycode == VK_LSHIFT){
-        ShowWindow(overlayHwnd, SW_HIDE);
-        SetTimer(overlayHwnd, peekTimerId, 500, nullptr);
-        return 1;
-      }
-      if(virtualKeycode == VK_LEFT){
-        POINT point;
-        GetCursorPos(&point);
-        SetCursorPos(point.x - 5, point.y);
-        return 1;
-      }
-      if (virtualKeycode == VK_RIGHT)
-      {
-        POINT point;
-        GetCursorPos(&point);
-        SetCursorPos(point.x + 5, point.y);
-        return 1;
-      }
-      if (virtualKeycode == VK_UP)
-      {
-        POINT point;
-        GetCursorPos(&point);
-        SetCursorPos(point.x, point.y - 5);
-        return 1;
-      }
-      if (virtualKeycode == VK_DOWN)
-      {
-        POINT point;
-        GetCursorPos(&point);
-        SetCursorPos(point.x, point.y + 5);
-        return 1;
-      }
-      if(virtualKeycode == VK_RETURN){
-        POINT point;
-        GetCursorPos(&point);
-        ClickAt(point.x, point.y);
-        return 1;
-      }
-      if(virtualKeycode == VK_OEM_3){
-        SetTimer(overlayHwnd, manualRefreshTimerId, 1, nullptr);
-        return 1;
-      }
-      if(virtualKeycode >= 'A' && virtualKeycode <= 'Z'){
-        inputBuffer += static_cast<wchar_t>(towlower(static_cast<wchar_t>(virtualKeycode)));
-        FindHintAndClick(overlayHwnd);
-        return 1;
+      if(isKeyDown){
+        if(virtualKeycode == VK_ESCAPE){
+          HideOverlay(overlayHwnd);
+          return 1;
+        }
+        if(virtualKeycode == VK_BACK){
+          if(!inputBuffer.empty()) inputBuffer.pop_back();
+          InvalidateRect(overlayHwnd, nullptr, FALSE);
+          return 1;
+        }
+        if(virtualKeycode == VK_LSHIFT){
+          ShowWindow(overlayHwnd, SW_HIDE);
+          SetTimer(overlayHwnd, peekTimerId, 500, nullptr);
+          return 1;
+        }
+        if(virtualKeycode == VK_RETURN){
+          POINT point;
+          GetCursorPos(&point);
+          ClickAt(point.x, point.y);
+          return 1;
+        }
+        if(virtualKeycode == VK_OEM_3){
+          SetTimer(overlayHwnd, manualRefreshTimerId, 1, nullptr);
+          return 1;
+        }
+        if(virtualKeycode >= 'A' && virtualKeycode <= 'Z'){
+          inputBuffer += static_cast<wchar_t>(towlower(static_cast<wchar_t>(virtualKeycode)));
+          FindHintAndClick(overlayHwnd);
+          return 1;
+        }
       }
     }
     return CallNextHookEx(nullptr, nCode, wParam, lParam);
@@ -412,6 +414,7 @@ namespace
       return 0;
 
       case WM_TIMER:
+      if(!hintModeActive) return 0;
       if(wParam == peekTimerId){
         KillTimer(hwnd, peekTimerId);
         if(hintModeActive) ShowWindow(hwnd, SW_SHOWNA);
@@ -419,6 +422,25 @@ namespace
         else if(wParam == manualRefreshTimerId || wParam == refreshTimerId){
           KillTimer(hwnd, wParam);
           RefreshAndRedraw(hwnd);
+        }
+        else if(wParam == cursorMovementTimerId){
+          if(!leftHeld && !rightHeld && !upHeld && !downHeld) KillTimer(hwnd, cursorMovementTimerId);
+          else{
+            constexpr int step = 10;
+            POINT point;
+            GetCursorPos(&point);
+            if(leftHeld)
+              point.x -= step;
+            if (rightHeld)
+              point.x += step;
+            if (upHeld)
+              point.y -= step;
+            if (downHeld)
+              point.y += step;
+
+            SetCursorPos(point.x, point.y);
+
+          }
         }
         return 0;
     }
