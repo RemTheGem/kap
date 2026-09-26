@@ -20,6 +20,8 @@ namespace
   constexpr int hotKeyId = 1;
   constexpr wchar_t windowClassName[] = L"HintOverlayWindowClass";
   constexpr UINT_PTR peekTimerId = 1;
+  constexpr UINT_PTR refreshTimerId = 2;
+  constexpr UINT_PTR manualRefreshTimerId = 3;
 
   const std::wstring alphabets = L"asdfghjklqwertyuiopzxcvbnm";
 
@@ -217,15 +219,7 @@ namespace
   void ClickElementAndContinue(HWND overlayHwnd, const ClickableElement &element){
     std::wcout << L"Clicking: " << element.name << L"\n";
     ClickAt(element.center.x, element.center.y);
-    Sleep(150);
-    RefreshElementsForForeground();
-    if(elements.empty()){
-      std::wcout << L"No clickable elements found. exiting\n";
-      HideOverlay(overlayHwnd);
-      return;
-    }
-    SetWindowPos(overlayHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    InvalidateRect(overlayHwnd, nullptr, TRUE);
+    SetTimer(overlayHwnd, refreshTimerId, 150, nullptr);
   }
 
 
@@ -271,6 +265,18 @@ namespace
     SetWindowPos(overlayHwnd, HWND_TOPMOST, overlayOriginX, overlayOriginY, width, height, SWP_SHOWWINDOW | SWP_NOACTIVATE);
     hintModeActive = true;
     InvalidateRect(overlayHwnd, nullptr, TRUE);
+  }
+
+  void RefreshAndRedraw(HWND hwnd){
+    RefreshElementsForForeground();
+    if(elements.empty()){
+      std::wcout << L"No clickable elements found. exiting.\n";
+      HideOverlay(hwnd);
+    }
+    else{
+      SetWindowPos(hwnd, HWND_TOPMOST, 0,0,0,0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+      InvalidateRect(hwnd, nullptr, TRUE);
+    }
   }
 
   bool RectsOverlap(const RECT &a, const RECT &b)
@@ -376,6 +382,10 @@ namespace
         ClickAt(point.x, point.y);
         return 1;
       }
+      if(virtualKeycode == VK_OEM_3){
+        SetTimer(overlayHwnd, manualRefreshTimerId, 1, nullptr);
+        return 1;
+      }
       if(virtualKeycode >= 'A' && virtualKeycode <= 'Z'){
         inputBuffer += static_cast<wchar_t>(towlower(static_cast<wchar_t>(virtualKeycode)));
         FindHintAndClick(overlayHwnd);
@@ -405,6 +415,10 @@ namespace
       if(wParam == peekTimerId){
         KillTimer(hwnd, peekTimerId);
         if(hintModeActive) ShowWindow(hwnd, SW_SHOWNA);
+        }
+        else if(wParam == manualRefreshTimerId || wParam == refreshTimerId){
+          KillTimer(hwnd, wParam);
+          RefreshAndRedraw(hwnd);
         }
         return 0;
     }
@@ -464,7 +478,7 @@ int wmain(){
                         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
   hintFontMedium = CreateFontW(-16, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-  hintFontSmall = CreateFontW(-14r, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+  hintFontSmall = CreateFontW(-14, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                               CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
 
   if(!RegisterHotKey(overlayHwnd, hotKeyId, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, VK_SPACE)){
