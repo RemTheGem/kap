@@ -426,6 +426,7 @@ namespace
         else if(wParam == cursorMovementTimerId){
           if(!leftHeld && !rightHeld && !upHeld && !downHeld) KillTimer(hwnd, cursorMovementTimerId);
           else{
+            while(ShowCursor(TRUE) < 0);
             constexpr int step = 10;
             POINT point;
             GetCursorPos(&point);
