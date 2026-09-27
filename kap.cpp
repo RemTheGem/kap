@@ -16,7 +16,7 @@ using namespace ATL;
 
 namespace
 {
-
+  // IDs
   constexpr int hotKeyId = 1;
   constexpr wchar_t windowClassName[] = L"HintOverlayWindowClass";
   constexpr UINT_PTR peekTimerId = 1;
@@ -24,18 +24,22 @@ namespace
   constexpr UINT_PTR manualRefreshTimerId = 3;
   constexpr UINT_PTR cursorMovementTimerId = 4;
 
+  // hint alphabets
   const std::wstring alphabets = L"asdfghjklqwertyuiopzxcvbnm";
 
+  // hint colors
   constexpr COLORREF transparentKey = RGB(1,1,1);
   constexpr COLORREF hintBg = RGB(255, 0, 0);
   constexpr COLORREF hintBgPrefixMatch = RGB(120, 220, 120);
   constexpr COLORREF hintText = RGB(20, 20, 20);
 
+  // UI automation Id and its label for console outputs
   struct PatternInfo{
     PROPERTYID propertyId;
     const wchar_t* label;
   };
 
+  // UI automation patterns that we are interested in (buttons and shit)
   constexpr std::array<PatternInfo, 4> interestingPatterns{{
     {UIA_IsInvokePatternAvailablePropertyId, L"Invoke"},
     {UIA_IsTogglePatternAvailablePropertyId, L"Toggle"},
@@ -43,6 +47,7 @@ namespace
     {UIA_IsExpandCollapsePatternAvailablePropertyId, L"ExpandCollapse"},
   }};
 
+  // clickable elements like buttons and toggles
   struct ClickableElement{
     std::wstring name;
     std::wstring hint;
@@ -71,6 +76,7 @@ namespace
   bool upHeld = false;
   bool downHeld = false;
 
+  // Check if UI element has any of the patterns we are interested in
   bool HasInterestingPattern(IUIAutomationElement *element){
     for(const auto &pattern : interestingPatterns){
       CComVariant value;
@@ -81,6 +87,8 @@ namespace
     return false;
   }
 
+  // UI Automation condition to check if any of the VISIBLE elements have at least one
+  // of our interesting patterns
   CComPtr<IUIAutomationCondition> BuildInterestingElementsCondition(IUIAutomation *automation){
     CComPtr<IUIAutomationCondition> patternCondition;
     for(const auto &pattern : interestingPatterns){
@@ -107,6 +115,8 @@ namespace
     return combined;
   }
 
+  // Generate hints of size count (number of interesting elements)
+  // Keep increasing hint size if we run out of alphabets ex. 27 elements > 26 alphabets so use double letters
   std::vector<std::wstring> GenerateHints(size_t count){
     std::vector<std::wstring> hints;
     if(count == 0) return hints;
@@ -132,7 +142,8 @@ namespace
     return hints;
   }
 
-
+  // Find visible clickable UI elements in current window, filter for interesting patterns
+  // and store the eligible elements' name, bounds and coordinates for later
   std::vector<ClickableElement> GetClickableElements(IUIAutomation *automation, HWND window){
     std::vector<ClickableElement> results;
     if(!window) return results;
@@ -172,6 +183,7 @@ namespace
     return results;
   }
 
+  // Find primary and secondary (if available) taskbar windows and return their window handle(s)
   std::vector<HWND> FindTaskbarWindows(){
     std::vector<HWND> result;
     if(HWND primary = FindWindowW(L"Shell_TrayWnd", nullptr)){
@@ -184,6 +196,7 @@ namespace
     return result;
   }
 
+  // combine clickable elements from foreground window and taskbar windows
   std::vector<ClickableElement> GetAllClickableElements(IUIAutomation *automation, HWND foregroundWindow){
     std::vector<ClickableElement> combined = GetClickableElements(automation, foregroundWindow);
 
@@ -195,6 +208,7 @@ namespace
     return combined;
   }
 
+  // Move cursor to x and y and simulate left click
   void ClickAt(int x, int y){
     SetCursorPos(x, y);
     INPUT inputs[2] = {};
@@ -205,6 +219,8 @@ namespace
     SendInput(2, inputs, sizeof(INPUT));
   }
 
+  // hide Kap overlay (hints) and reset input states
+  // like releasing mouse button if it was held for drag
   void HideOverlay(HWND overlayHwnd){
     if(draggingCursorHeld){
       INPUT input{};
@@ -218,6 +234,8 @@ namespace
     inputBuffer.clear(); 
   }
 
+  // Refresh clickable elements for current foreground window
+  // and (re)assign hints for each element (no visible difference in the overlay)
   void RefreshElementsForForeground(){
     originalForeground = GetForegroundWindow();
     elements = GetAllClickableElements(automation, originalForeground);
@@ -229,14 +247,17 @@ namespace
     inputBuffer.clear();
   }
 
-
+  // Click the selected UI element and schedule an overlay refresh 
+  // timer to ensure everything loads. May need adjusting
   void ClickElementAndContinue(HWND overlayHwnd, const ClickableElement &element){
     std::wcout << L"Clicking: " << element.name << L"\n";
     ClickAt(element.center.x, element.center.y);
     SetTimer(overlayHwnd, refreshTimerId, 150, nullptr);
   }
 
-
+  // Find the element matching the current input and click it
+  // if no match yet then wait for more input
+  // else clear input buffer
   void FindHintAndClick(HWND overlayHwnd){
     for(const auto &element : elements){
       if(element.hint == inputBuffer){
@@ -257,6 +278,8 @@ namespace
     InvalidateRect(overlayHwnd, nullptr, FALSE);
   }
 
+  // Start Hint Mode: Find clickable elements, assign hints
+  // and display the overlay for the eligible window(s)
   void ShowOverlayForForeground(HWND overlayHwnd){
     originalForeground = GetForegroundWindow();
     if(!originalForeground) return;
@@ -281,6 +304,8 @@ namespace
     InvalidateRect(overlayHwnd, nullptr, TRUE);
   }
 
+  // Refresh the clickable elements and redraw the overlay
+  // if no elements then hide overlay
   void RefreshAndRedraw(HWND hwnd){
     RefreshElementsForForeground();
     if(elements.empty()){
@@ -293,10 +318,13 @@ namespace
     }
   }
 
+  // Check if two element rects overlap
   bool RectsOverlap(const RECT &a, const RECT &b)
   {
     return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
   }
+
+  // Draw the hints, their rects while avoiding overlap between labels
   void PaintOverlay(HWND hwnd){
     PAINTSTRUCT paintStruct;
     HDC hdc = BeginPaint(hwnd, &paintStruct);
@@ -345,6 +373,7 @@ namespace
   }
 
 
+  // Global low level keyboard hook to handle hint input, overlay controls and mouse simulations
   LRESULT CALLBACK ProcessKeyboardTransparent(int nCode, WPARAM wParam, LPARAM lParam){
     if(nCode == HC_ACTION && hintModeActive){
 
@@ -423,6 +452,7 @@ namespace
     return CallNextHookEx(nullptr, nCode, wParam, lParam);
   }
 
+  // Handle messages sent to overlay window including hotkey, painting, timers and destruction
   LRESULT CALLBACK WindowProcess(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam){
     switch(msg){
       case WM_HOTKEY:
@@ -474,6 +504,7 @@ namespace
     return DefWindowProc(hwnd, msg, wParam, lParam);
   }
 
+  // Register the overlay window class and create a transparent, topmost popup window to display our hints
   HWND CreateOverlay(HINSTANCE instance){
 
     WNDCLASSW wc{};
@@ -494,7 +525,9 @@ namespace
   }
 }
 
-
+// MAIN: init COM and UI Automation, create the overlay,
+// register global hotkey and keyboard hook then run message loop
+// until the program exits
 int wmain(){
   _setmode(_fileno(stdout), _O_U16TEXT);
   _setmode(_fileno(stdin), _O_U16TEXT);
