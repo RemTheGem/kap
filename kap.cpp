@@ -393,6 +393,16 @@ namespace
           SendInput(1, &input, sizeof(INPUT));
           return 1;
         }
+        if (virtualKeycode == VK_RETURN && (GetAsyncKeyState(VK_CONTROL ) & 0x8000))
+        {
+          INPUT input[2] = {};
+          input[0].type = INPUT_MOUSE;
+          input[0].mi.dwFlags = MOUSEEVENTF_RIGHTDOWN;
+          input[1].type = INPUT_MOUSE;
+          input[1].mi.dwFlags = MOUSEEVENTF_RIGHTUP;
+          SendInput(2, input, sizeof(INPUT));
+          return 1;
+        }
         if(virtualKeycode == VK_RETURN){
           POINT point;
           GetCursorPos(&point);
