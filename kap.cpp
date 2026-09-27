@@ -64,6 +64,7 @@ namespace
   HFONT hintFontLarge = nullptr;
   HFONT hintFontMedium = nullptr;
   HFONT hintFontSmall = nullptr;
+  bool draggingCursorHeld = false;
 
   bool leftHeld = false;
   bool rightHeld = false;
@@ -205,9 +206,16 @@ namespace
   }
 
   void HideOverlay(HWND overlayHwnd){
-   ShowWindow(overlayHwnd, SW_HIDE);
-   hintModeActive = false;
-   inputBuffer.clear(); 
+    if(draggingCursorHeld){
+      INPUT input{};
+      input.type = INPUT_MOUSE;
+      input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+      SendInput(1, &input, sizeof(INPUT));
+      draggingCursorHeld = false;
+    }
+    ShowWindow(overlayHwnd, SW_HIDE);
+    hintModeActive = false;
+    inputBuffer.clear(); 
   }
 
   void RefreshElementsForForeground(){
@@ -357,7 +365,7 @@ namespace
         if(heldFlag){
           *heldFlag = isKeyDown;
           if(isKeyDown){
-            SetTimer(overlayHwnd, cursorMovementTimerId, 16, nullptr);
+            SetTimer(overlayHwnd, cursorMovementTimerId, 2, nullptr);
             return 1;
           }
         }
@@ -375,6 +383,14 @@ namespace
         if(virtualKeycode == VK_LSHIFT){
           ShowWindow(overlayHwnd, SW_HIDE);
           SetTimer(overlayHwnd, peekTimerId, 500, nullptr);
+          return 1;
+        }
+        if(virtualKeycode == VK_SPACE){
+          draggingCursorHeld = !draggingCursorHeld;
+          INPUT input{};
+          input.type = INPUT_MOUSE;
+          input.mi.dwFlags = draggingCursorHeld ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
+          SendInput(1, &input, sizeof(INPUT));
           return 1;
         }
         if(virtualKeycode == VK_RETURN){
