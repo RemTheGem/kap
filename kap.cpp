@@ -101,6 +101,7 @@ namespace
       }
       else{
         CComPtr<IUIAutomationCondition> merged;
+        // Combine patterns with OR. each element needs only one condition
         automation->CreateOrCondition(patternCondition, condition, &merged);
         patternCondition = merged;
       }
@@ -121,19 +122,23 @@ namespace
     std::vector<std::wstring> hints;
     if(count == 0) return hints;
 
+    // number of characters in hints
     size_t length = 1;
+    // number of hints possible with current length
     size_t capacity = alphabets.size();
+    // increase the number of characters in hints if the current amount doesnt fit all hints
     while(capacity < count){
       length++;
       capacity *= alphabets.size();
     }
 
+    // store the current position of each character of the hint
     std::vector<size_t> indices(length, 0);
     for(size_t n = 0; n < count; n++){
       std::wstring hint(length, L' ');
       for(size_t i = 0; i < length; i++) hint[i] = alphabets[indices[i]];
       hints.push_back(hint);
-
+      // increment the hint like odometer. carry to the left when out of characters for this index
       for(size_t i = length; i-- > 0;){
         if(++indices[i] < alphabets.size()) break;
         indices[i] = 0;
@@ -159,6 +164,7 @@ namespace
     elements->get_Length(&count);
 
     for(int i = 0; i < count; i++){
+      // mElement is MyElement. tryna avoid shadow variables cuz i didnt pick good names T-T
       CComPtr<IUIAutomationElement> mElement;
       elements->GetElement(i, &mElement);
       if (!mElement)
@@ -168,12 +174,15 @@ namespace
 
       RECT rect{};
       mElement->get_CurrentBoundingRectangle(&rect);
+      // ignore invalid or empty rects
       if(rect.right <= rect.left || rect.bottom <= rect.top) continue;
 
       CComBSTR name;
       mElement->get_CurrentName(&name);
 
+      // set values for element
       ClickableElement entry;
+      // copy element's name. if none then unnnamed
       entry.name = name.Length() ? std::wstring(name.m_str, name.Length()) : L"(unnamed)";
       entry.rect = rect;
       entry.center.x = (rect.left + rect.right) / 2;
@@ -186,10 +195,12 @@ namespace
   // Find primary and secondary (if available) taskbar windows and return their window handle(s)
   std::vector<HWND> FindTaskbarWindows(){
     std::vector<HWND> result;
+    // get main taskbar
     if(HWND primary = FindWindowW(L"Shell_TrayWnd", nullptr)){
       result.push_back(primary);
     }
     HWND secondary = nullptr;
+    // check for taskbars for other screens if any
     while((secondary = FindWindowExW(nullptr, secondary, L"Shell_SecondaryTrayWnd", nullptr)) != nullptr){
       result.push_back(secondary);
     }
@@ -252,6 +263,7 @@ namespace
   void ClickElementAndContinue(HWND overlayHwnd, const ClickableElement &element){
     std::wcout << L"Clicking: " << element.name << L"\n";
     ClickAt(element.center.x, element.center.y);
+    // wait 150 ms before refreshing. wait cuz things need to load
     SetTimer(overlayHwnd, refreshTimerId, 150, nullptr);
   }
 
@@ -273,7 +285,7 @@ namespace
         break;
       }
     }
-
+    // you wrote total bs? no problem. clear buffer
     if(!anyMatches) inputBuffer.clear();
     InvalidateRect(overlayHwnd, nullptr, FALSE);
   }
@@ -324,7 +336,7 @@ namespace
     return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
   }
 
-  // Draw the hints, their rects while avoiding overlap between labels
+  // Draw the hints and their rects while avoiding overlap between labels
   void PaintOverlay(HWND hwnd){
     PAINTSTRUCT paintStruct;
     HDC hdc = BeginPaint(hwnd, &paintStruct);
@@ -344,6 +356,7 @@ namespace
       constexpr int padding = 4;
       RECT labelRect{};
       HFONT chosenFont = hintFontSmall;
+      // Choose the right font size based on how much space we have
       for(HFONT font : candidateFonts){
         SelectObject(hdc, font);
         RECT measure{};
@@ -381,6 +394,7 @@ namespace
       bool isKeyUp = (wParam == WM_KEYUP || wParam == WM_SYSKEYUP);
       auto *info = reinterpret_cast<KBDLLHOOKSTRUCT *>(lParam);
       DWORD virtualKeycode = info->vkCode;
+      // cursor movement
       if(isKeyDown || isKeyUp){
         bool *heldFlag = nullptr;
         if(virtualKeycode == VK_LEFT)
@@ -400,20 +414,24 @@ namespace
         }
       }
       if(isKeyDown){
+        // exit hint mode
         if(virtualKeycode == VK_ESCAPE){
           HideOverlay(overlayHwnd);
           return 1;
         }
+        // remove last typed character
         if(virtualKeycode == VK_BACK){
           if(!inputBuffer.empty()) inputBuffer.pop_back();
           InvalidateRect(overlayHwnd, nullptr, FALSE);
           return 1;
         }
+        // peek (hide hint overlay for half a sec)
         if(virtualKeycode == VK_LSHIFT){
           ShowWindow(overlayHwnd, SW_HIDE);
           SetTimer(overlayHwnd, peekTimerId, 500, nullptr);
           return 1;
         }
+        // press and hold left mouse button. again to turn off
         if(virtualKeycode == VK_SPACE){
           draggingCursorHeld = !draggingCursorHeld;
           INPUT input{};
@@ -422,6 +440,7 @@ namespace
           SendInput(1, &input, sizeof(INPUT));
           return 1;
         }
+        // Right click mouse
         if (virtualKeycode == VK_RETURN && (GetAsyncKeyState(VK_CONTROL ) & 0x8000))
         {
           INPUT input[2] = {};
@@ -432,16 +451,19 @@ namespace
           SendInput(2, input, sizeof(INPUT));
           return 1;
         }
+        // left click mouse
         if(virtualKeycode == VK_RETURN){
           POINT point;
           GetCursorPos(&point);
           ClickAt(point.x, point.y);
           return 1;
         }
+        // refresh overlay
         if(virtualKeycode == VK_OEM_3){
           SetTimer(overlayHwnd, manualRefreshTimerId, 1, nullptr);
           return 1;
         }
+        // type shit
         if(virtualKeycode >= 'A' && virtualKeycode <= 'Z'){
           inputBuffer += static_cast<wchar_t>(towlower(static_cast<wchar_t>(virtualKeycode)));
           FindHintAndClick(overlayHwnd);
@@ -455,20 +477,24 @@ namespace
   // Handle messages sent to overlay window including hotkey, painting, timers and destruction
   LRESULT CALLBACK WindowProcess(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam){
     switch(msg){
+      // toggle hint mode with hotkey
       case WM_HOTKEY:
       if(wParam == hotKeyId){
         ShowOverlayForForeground(hwnd);
       }
       return 0;
 
+      // paint the overlay
       case WM_PAINT:
       PaintOverlay(hwnd);
       return 0;
 
+      // DESTROY window
       case WM_DESTROY:
       PostQuitMessage(0);
       return 0;
 
+      // timers of various uses
       case WM_TIMER:
       if(!hintModeActive) return 0;
       if(wParam == peekTimerId){
