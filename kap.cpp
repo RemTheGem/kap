@@ -70,6 +70,7 @@ namespace
   HFONT hintFontMedium = nullptr;
   HFONT hintFontSmall = nullptr;
   bool draggingCursorHeld = false;
+  bool overlayHidden = false;
 
   bool leftHeld = false;
   bool rightHeld = false;
@@ -430,6 +431,17 @@ namespace
           ShowWindow(overlayHwnd, SW_HIDE);
           SetTimer(overlayHwnd, peekTimerId, 500, nullptr);
           return 1;
+        }
+        // Hide/show hints
+        if(virtualKeycode == VK_RSHIFT){
+          if(!overlayHidden){
+            ShowWindow(overlayHwnd, SW_HIDE);
+            overlayHidden = !overlayHidden;
+          }
+          else{
+            ShowWindow(overlayHwnd, SW_SHOW);
+            overlayHidden = !overlayHidden;
+          }
         }
         // press and hold left mouse button. again to turn off
         if(virtualKeycode == VK_SPACE){
