@@ -33,8 +33,24 @@ namespace
   constexpr COLORREF hintBgPrefixMatch = RGB(120, 220, 120);
   constexpr COLORREF hintText = RGB(20, 20, 20);
 
+  // Keyboard buttons
+  constexpr DWORD moveCursorLeftK = VK_LEFT;
+  constexpr DWORD moveCursorRightK = VK_RIGHT;
+  constexpr DWORD moveCursorUpK = VK_UP;
+  constexpr DWORD moveCursorDownK = VK_DOWN;
+  constexpr DWORD exitHintModeK = VK_ESCAPE;
+  constexpr DWORD eraseCharK = VK_BACK;
+  constexpr DWORD peekK = VK_LSHIFT;
+  constexpr DWORD hideHintsK = VK_RSHIFT;
+  constexpr DWORD pressAndHoldMouseK = VK_SPACE;
+  constexpr DWORD manualRefreshK = VK_OEM_3;
+  constexpr DWORD pressLeftMouseK = VK_RETURN;
+  constexpr DWORD modifyMouseClickK = VK_CONTROL;
+
+
   // UI automation Id and its label for console outputs
-  struct PatternInfo{
+  struct PatternInfo
+  {
     PROPERTYID propertyId;
     const wchar_t* label;
   };
@@ -398,13 +414,13 @@ namespace
       // cursor movement
       if(isKeyDown || isKeyUp){
         bool *heldFlag = nullptr;
-        if(virtualKeycode == VK_LEFT)
+        if(virtualKeycode == moveCursorLeftK)
           heldFlag = &leftHeld;
-        if (virtualKeycode == VK_RIGHT)
+        if (virtualKeycode == moveCursorRightK)
           heldFlag = &rightHeld;
-        if (virtualKeycode == VK_UP)
+        if (virtualKeycode == moveCursorUpK)
           heldFlag = &upHeld;
-        if (virtualKeycode == VK_DOWN)
+        if (virtualKeycode == moveCursorDownK)
           heldFlag = &downHeld;
         if(heldFlag){
           *heldFlag = isKeyDown;
@@ -416,24 +432,26 @@ namespace
       }
       if(isKeyDown){
         // exit hint mode
-        if(virtualKeycode == VK_ESCAPE){
+        if(virtualKeycode == exitHintModeK){
           HideOverlay(overlayHwnd);
           return 1;
         }
         // remove last typed character
-        if(virtualKeycode == VK_BACK){
+        if(virtualKeycode == eraseCharK){
           if(!inputBuffer.empty()) inputBuffer.pop_back();
           InvalidateRect(overlayHwnd, nullptr, FALSE);
           return 1;
         }
         // peek (hide hint overlay for half a sec)
-        if(virtualKeycode == VK_LSHIFT){
-          ShowWindow(overlayHwnd, SW_HIDE);
-          SetTimer(overlayHwnd, peekTimerId, 500, nullptr);
-          return 1;
+        if(virtualKeycode == peekK){
+          if(!overlayHidden){
+            ShowWindow(overlayHwnd, SW_HIDE);
+            SetTimer(overlayHwnd, peekTimerId, 500, nullptr);
+            return 1;
+          }
         }
         // Hide/show hints
-        if(virtualKeycode == VK_RSHIFT){
+        if(virtualKeycode == hideHintsK){
           if(!overlayHidden){
             ShowWindow(overlayHwnd, SW_HIDE);
             overlayHidden = !overlayHidden;
@@ -442,9 +460,10 @@ namespace
             ShowWindow(overlayHwnd, SW_SHOW);
             overlayHidden = !overlayHidden;
           }
+          return 1;
         }
         // press and hold left mouse button. again to turn off
-        if(virtualKeycode == VK_SPACE){
+        if(virtualKeycode == pressAndHoldMouseK){
           draggingCursorHeld = !draggingCursorHeld;
           INPUT input{};
           input.type = INPUT_MOUSE;
@@ -453,7 +472,7 @@ namespace
           return 1;
         }
         // Right click mouse
-        if (virtualKeycode == VK_RETURN && (GetAsyncKeyState(VK_CONTROL ) & 0x8000))
+        if (virtualKeycode == pressLeftMouseK && (GetAsyncKeyState(modifyMouseClickK) & 0x8000))
         {
           INPUT input[2] = {};
           input[0].type = INPUT_MOUSE;
@@ -464,14 +483,14 @@ namespace
           return 1;
         }
         // left click mouse
-        if(virtualKeycode == VK_RETURN){
+        if(virtualKeycode == pressLeftMouseK){
           POINT point;
           GetCursorPos(&point);
           ClickAt(point.x, point.y);
           return 1;
         }
         // refresh overlay
-        if(virtualKeycode == VK_OEM_3){
+        if(virtualKeycode == manualRefreshK){
           SetTimer(overlayHwnd, manualRefreshTimerId, 1, nullptr);
           return 1;
         }
