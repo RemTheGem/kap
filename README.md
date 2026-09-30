@@ -18,6 +18,7 @@ the hints or move the cursor (with keyboard) to click elements.
 Key | Action
 ----|-------
 Ctrl + Shift + Space | Activate Hint Mode
+Ctrl + Shift + K | Open Keybinds Menu
 a-z (letters) | hint input
 Enter | Left Click at the current cursor position
 Ctrl + Enter | Right Click at the current cursor position
