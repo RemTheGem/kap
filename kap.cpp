@@ -29,23 +29,27 @@ namespace
 
   // hint colors
   constexpr COLORREF transparentKey = RGB(1,1,1);
-  constexpr COLORREF hintBg = RGB(255, 0, 0);
+  constexpr COLORREF hintBg = RGB(0, 255, 255);
   constexpr COLORREF hintBgPrefixMatch = RGB(120, 220, 120);
   constexpr COLORREF hintText = RGB(20, 20, 20);
 
+  // setttings window
+  constexpr wchar_t settingsWindowClassName[] = L"KapSettingsWindowClass";
+  constexpr int settingsHotKeyId = 2;
+
   // Keyboard buttons
-  constexpr DWORD moveCursorLeftK = VK_LEFT;
-  constexpr DWORD moveCursorRightK = VK_RIGHT;
-  constexpr DWORD moveCursorUpK = VK_UP;
-  constexpr DWORD moveCursorDownK = VK_DOWN;
-  constexpr DWORD exitHintModeK = VK_ESCAPE;
-  constexpr DWORD eraseCharK = VK_BACK;
-  constexpr DWORD peekK = VK_LSHIFT;
-  constexpr DWORD hideHintsK = VK_RSHIFT;
-  constexpr DWORD pressAndHoldMouseK = VK_SPACE;
-  constexpr DWORD manualRefreshK = VK_OEM_3;
-  constexpr DWORD pressLeftMouseK = VK_RETURN;
-  constexpr DWORD modifyMouseClickK = VK_CONTROL;
+  DWORD moveCursorLeftK = VK_LEFT;
+  DWORD moveCursorRightK = VK_RIGHT;
+  DWORD moveCursorUpK = VK_UP;
+  DWORD moveCursorDownK = VK_DOWN;
+  DWORD exitHintModeK = VK_ESCAPE;
+  DWORD eraseCharK = VK_BACK;
+  DWORD peekK = VK_LSHIFT;
+  DWORD hideHintsK = VK_RSHIFT;
+  DWORD pressAndHoldMouseK = VK_SPACE;
+  DWORD manualRefreshK = VK_OEM_3;
+  DWORD pressLeftMouseK = VK_RETURN;
+  DWORD modifyMouseClickK = VK_CONTROL;
 
 
   // UI automation Id and its label for console outputs
@@ -53,6 +57,12 @@ namespace
   {
     PROPERTYID propertyId;
     const wchar_t* label;
+  };
+
+  // Keybinds' labels and keys
+  struct Keybinding{
+    const wchar_t* actionLabel;
+    DWORD* keyVariable;
   };
 
   // UI automation patterns that we are interested in (buttons and shit)
@@ -63,8 +73,26 @@ namespace
     {UIA_IsExpandCollapsePatternAvailablePropertyId, L"ExpandCollapse"},
   }};
 
+  // Default keybindings
+
+  Keybinding keybindings[] = {
+      {L"Move Cursor Left", &moveCursorLeftK},
+      {L"Move Cursor Right", &moveCursorRightK},
+      {L"Move Cursor Up", &moveCursorUpK},
+      {L"Move Cursor Down", &moveCursorDownK},
+      {L"Exit Hint Mode", &exitHintModeK},
+      {L"Erase Character", &eraseCharK},
+      {L"Peek", &peekK},
+      {L"Hide/Show Hints", &hideHintsK},
+      {L"Press & Hold Mouse (Drag)", &pressAndHoldMouseK},
+      {L"Manual Refresh", &manualRefreshK},
+      {L"Left Click", &pressLeftMouseK},
+      {L"Right-Click Modifier", &modifyMouseClickK},
+  };
+
   // clickable elements like buttons and toggles
-  struct ClickableElement{
+  struct ClickableElement
+  {
     std::wstring name;
     std::wstring hint;
     RECT rect{};
@@ -78,6 +106,8 @@ namespace
   std::wstring inputBuffer;
   HWND originalForeground = nullptr;
   HWND overlayHwnd = nullptr;
+  HWND settingsHwnd = nullptr;
+  std::vector<HWND> settingsValueLabels;
   HHOOK keyboardHook = nullptr;
   bool hintModeActive = false;
   int overlayOriginX = 0;
@@ -93,6 +123,27 @@ namespace
   bool upHeld = false;
   bool downHeld = false;
 
+
+  // Turn virtual keycode names into local display name
+  std::wstring VkCodeToName(DWORD vk){
+    UINT scanCode = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
+    LONG lParamValue = scanCode << 16;
+    // ensure the right version of the key is used
+    switch (vk)
+    {
+    case VK_LEFT: case VK_RIGHT: case VK_UP: case VK_DOWN:
+    case VK_RCONTROL: case VK_RMENU:
+    case VK_INSERT: case VK_DELETE: case VK_HOME: case VK_END:
+    case VK_PRIOR: case VK_NEXT:
+      lParamValue |= 0x1000000;
+      break;
+    }
+    wchar_t buffer[64] = {};
+    if(GetKeyNameTextW(lParamValue, buffer, 64) > 0){
+      return buffer;
+    }
+    return L"(Unknown)";
+  }
   // Check if UI element has any of the patterns we are interested in
   bool HasInterestingPattern(IUIAutomationElement *element){
     for(const auto &pattern : interestingPatterns){
@@ -281,7 +332,7 @@ namespace
     std::wcout << L"Clicking: " << element.name << L"\n";
     ClickAt(element.center.x, element.center.y);
     // wait 150 ms before refreshing. wait cuz things need to load
-    SetTimer(overlayHwnd, refreshTimerId, 150, nullptr);
+    SetTimer(overlayHwnd, refreshTimerId, 300, nullptr);
   }
 
   // Find the element matching the current input and click it
@@ -431,6 +482,22 @@ namespace
         }
       }
       if(isKeyDown){
+        bool ctrlHeld = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+
+        // Right click mouse (need this first to avoid collision with settings menu)
+        if (virtualKeycode == pressLeftMouseK && ctrlHeld)
+        {
+          INPUT input[2] = {};
+          input[0].type = INPUT_MOUSE;
+          input[0].mi.dwFlags = MOUSEEVENTF_RIGHTDOWN;
+          input[1].type = INPUT_MOUSE;
+          input[1].mi.dwFlags = MOUSEEVENTF_RIGHTUP;
+          SendInput(2, input, sizeof(INPUT));
+          return 1;
+        }
+        if(ctrlHeld){
+          return CallNextHookEx(nullptr, nCode, wParam, lParam);
+        }
         // exit hint mode
         if(virtualKeycode == exitHintModeK){
           HideOverlay(overlayHwnd);
@@ -471,17 +538,7 @@ namespace
           SendInput(1, &input, sizeof(INPUT));
           return 1;
         }
-        // Right click mouse
-        if (virtualKeycode == pressLeftMouseK && (GetAsyncKeyState(modifyMouseClickK) & 0x8000))
-        {
-          INPUT input[2] = {};
-          input[0].type = INPUT_MOUSE;
-          input[0].mi.dwFlags = MOUSEEVENTF_RIGHTDOWN;
-          input[1].type = INPUT_MOUSE;
-          input[1].mi.dwFlags = MOUSEEVENTF_RIGHTUP;
-          SendInput(2, input, sizeof(INPUT));
-          return 1;
-        }
+
         // left click mouse
         if(virtualKeycode == pressLeftMouseK){
           POINT point;
@@ -505,6 +562,46 @@ namespace
     return CallNextHookEx(nullptr, nCode, wParam, lParam);
   }
 
+  // handle settings window. normal window to change keybinds(for now).
+  LRESULT CALLBACK SettingsWindowProcess(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam){
+    switch(msg){
+      case WM_CREATE:{
+        HINSTANCE instance = reinterpret_cast<HINSTANCE>(GetWindowLongPtr(hwnd, GWLP_HINSTANCE));
+        constexpr int marginX = 20;
+        constexpr int marginY = 20;
+        constexpr int rowHeight = 28;
+        constexpr int labelWidth = 220;
+        constexpr int valueWidth = 140;
+        for(size_t i = 0; i<std::size(keybindings); i++){
+          int y = marginY + static_cast<int>(i) *rowHeight;
+          // action labels. wont change once created
+          CreateWindowW(L"STATIC", keybindings[i].actionLabel, WS_CHILD | WS_VISIBLE, marginX, y, labelWidth, rowHeight-4, hwnd, nullptr, instance, nullptr);
+          // action keys. can be change by user
+          std::wstring currentName = VkCodeToName(*keybindings[i].keyVariable);
+          HWND valueLabel = CreateWindowW(L"STATIC", currentName.c_str(), WS_CHILD | WS_VISIBLE, marginX + labelWidth + 10, y, valueWidth, rowHeight-4, hwnd, nullptr, instance, nullptr);
+          settingsValueLabels.push_back(valueLabel);
+        }
+        return 0;
+      }
+      case WM_CLOSE:
+      ShowWindow(hwnd, SW_HIDE);
+      return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+  }
+  // create the setttings window. normal window
+  HWND CreateSettingsWindow(HINSTANCE instance){
+    WNDCLASSW wc{};
+    wc.lpfnWndProc = SettingsWindowProcess;
+    wc.hInstance = instance;
+    wc.lpszClassName = settingsWindowClassName;
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_BTNFACE+1);
+    RegisterClassW(&wc);
+    constexpr int windowWidth = 20+220+10+140+20;
+    int windowHeight = 20*20+ static_cast<int>(std::size(keybindings)) *28+40;
+    return CreateWindowW(settingsWindowClassName, L"Kap Keybinds", WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, CW_USEDEFAULT, CW_USEDEFAULT, windowWidth, windowHeight, nullptr, nullptr, instance, nullptr);
+  }
   // Handle messages sent to overlay window including hotkey, painting, timers and destruction
   LRESULT CALLBACK WindowProcess(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam){
     switch(msg){
@@ -512,6 +609,10 @@ namespace
       case WM_HOTKEY:
       if(wParam == hotKeyId){
         ShowOverlayForForeground(hwnd);
+      }
+      else if(wParam == settingsHotKeyId){
+        ShowWindow(settingsHwnd, SW_SHOW);
+        SetForegroundWindow(settingsHwnd);
       }
       return 0;
 
@@ -604,6 +705,7 @@ int wmain(){
   }
 
   HINSTANCE mInstance = GetModuleHandleW(nullptr);
+  // create our overlay
   HWND mOverlayHwnd = CreateOverlay(mInstance);
   if (!mOverlayHwnd)
   {
@@ -611,7 +713,15 @@ int wmain(){
     CoUninitialize();
     return 1;
   }
+  // create the settings window
+  HWND mSettingsHwnd = CreateSettingsWindow(mInstance);
+  if(!mSettingsHwnd){
+    std::wcerr << L"Failed to create settings window. \n";
+    CoUninitialize();
+    return 1;
+  }
 
+  settingsHwnd = mSettingsHwnd;
   overlayHwnd = mOverlayHwnd;
   hintFontLarge = CreateFontW(-20, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
@@ -622,6 +732,11 @@ int wmain(){
 
   if(!RegisterHotKey(overlayHwnd, hotKeyId, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, VK_SPACE)){
     std::wcerr << L"Register hotkey failed. \n ";
+    CoUninitialize();
+    return 1;
+  }
+  if(!RegisterHotKey(overlayHwnd, settingsHotKeyId, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, 'K')){
+    std::wcerr << L"Register settings hotkey failed. \n";
     CoUninitialize();
     return 1;
   }
@@ -641,6 +756,7 @@ int wmain(){
 
   UnhookWindowsHookEx(keyboardHook);
   UnregisterHotKey(overlayHwnd, hotKeyId);
+  UnregisterHotKey(overlayHwnd, settingsHotKeyId);
   CoUninitialize();
   return 0;
 }
