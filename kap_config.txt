@@ -1,0 +1,12 @@
+moveCursorLeft=37
+moveCursorRight=39
+moveCursorUp=38
+moveCursorDown=40
+exitHintMode=27
+eraseChar=8
+peek=160
+hideHints=161
+pressAndHoldMouse=32
+manualRefresh=192
+pressLeftMouse=13
+modifyMouseClick=17

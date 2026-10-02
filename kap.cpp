@@ -9,6 +9,7 @@
 #include <cwctype>
 #include <fcntl.h>
 #include <io.h>
+#include <fstream>
 
 
 using namespace ATL;
@@ -62,7 +63,9 @@ namespace
   // Keybinds' labels and keys
   struct Keybinding{
     const wchar_t* actionLabel;
+    const wchar_t* configName;
     DWORD* keyVariable;
+    DWORD defaultValue;
   };
 
   // UI automation patterns that we are interested in (buttons and shit)
@@ -76,18 +79,18 @@ namespace
   // Default keybindings
 
   Keybinding keybindings[] = {
-      {L"Move Cursor Left", &moveCursorLeftK},
-      {L"Move Cursor Right", &moveCursorRightK},
-      {L"Move Cursor Up", &moveCursorUpK},
-      {L"Move Cursor Down", &moveCursorDownK},
-      {L"Exit Hint Mode", &exitHintModeK},
-      {L"Erase Character", &eraseCharK},
-      {L"Peek", &peekK},
-      {L"Hide/Show Hints", &hideHintsK},
-      {L"Press & Hold Mouse (Drag)", &pressAndHoldMouseK},
-      {L"Manual Refresh", &manualRefreshK},
-      {L"Left Click", &pressLeftMouseK},
-      {L"Right-Click Modifier", &modifyMouseClickK},
+      {L"Move Cursor Left", L"moveCursorLeft", &moveCursorLeftK, VK_LEFT},
+      {L"Move Cursor Right", L"moveCursorRight", &moveCursorRightK, VK_RIGHT},
+      {L"Move Cursor Up", L"moveCursorUp", &moveCursorUpK, VK_UP},
+      {L"Move Cursor Down", L"moveCursorDown", &moveCursorDownK, VK_DOWN},
+      {L"Exit Hint Mode", L"exitHintMode", &exitHintModeK, VK_ESCAPE},
+      {L"Erase Character", L"eraseChar", &eraseCharK, VK_BACK},
+      {L"Peek", L"peek", &peekK, VK_LSHIFT},
+      {L"Hide/Show Hints", L"hideHints", &hideHintsK, VK_RSHIFT},
+      {L"Press & Hold Mouse (Drag)", L"pressAndHoldMouse", &pressAndHoldMouseK, VK_SPACE},
+      {L"Manual Refresh", L"manualRefresh", &manualRefreshK, VK_OEM_3},
+      {L"Left Click", L"pressLeftMouse", &pressLeftMouseK, VK_RETURN},
+      {L"Right-Click Modifier", L"modifyMouseClick", &modifyMouseClickK, VK_CONTROL},
   };
 
   // clickable elements like buttons and toggles
@@ -108,6 +111,11 @@ namespace
   HWND overlayHwnd = nullptr;
   HWND settingsHwnd = nullptr;
   std::vector<HWND> settingsValueLabels;
+  std::vector<HWND> settingsRebindButtons;
+  int awaitingBindIndex = -1;
+  constexpr wchar_t configFilePath[] = L"kap_config.txt";
+  constexpr int rebindButtonIdBase = 1000;
+  constexpr int resetButtonId = 2000;
   HHOOK keyboardHook = nullptr;
   bool hintModeActive = false;
   int overlayOriginX = 0;
@@ -155,6 +163,36 @@ namespace
     return false;
   }
 
+
+  // save key bindings
+  void SaveKeybindings(){
+    std::wofstream file(configFilePath);
+    if(!file.is_open()) return;
+    for (const auto &binding : keybindings)
+    {
+      file << binding.configName << L"=" << *binding.keyVariable << L"\n";
+    }
+  }
+
+  // load key bindings
+  void LoadKeybindings(){
+    std::wifstream file(configFilePath);
+    if(!file.is_open()) return;
+    std::wstring line;
+    while(std::getline(file, line)){
+      size_t eq = line.find(L'=');
+      if(eq == std::wstring::npos) continue;
+      std::wstring action = line.substr(0, eq);
+      DWORD vk = static_cast<DWORD>(wcstoul(line.substr(eq+1).c_str(), nullptr, 10));
+      if(!vk) continue;
+      for(auto& binding : keybindings){
+        if(action == binding.configName){
+          *binding.keyVariable = vk;
+          break;
+        }
+      }
+    }
+  }
   // UI Automation condition to check if any of the VISIBLE elements have at least one
   // of our interesting patterns
   CComPtr<IUIAutomationCondition> BuildInterestingElementsCondition(IUIAutomation *automation){
@@ -580,7 +618,62 @@ namespace
           std::wstring currentName = VkCodeToName(*keybindings[i].keyVariable);
           HWND valueLabel = CreateWindowW(L"STATIC", currentName.c_str(), WS_CHILD | WS_VISIBLE, marginX + labelWidth + 10, y, valueWidth, rowHeight-4, hwnd, nullptr, instance, nullptr);
           settingsValueLabels.push_back(valueLabel);
+          HWND rebindButton = CreateWindowW(L"BUTTON", L"Rebind", WS_CHILD | WS_VISIBLE, marginX + labelWidth + valueWidth, y, 110, rowHeight-4, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(rebindButtonIdBase + i)), instance, nullptr);
+          settingsRebindButtons.push_back(rebindButton);
         }
+        int resetY = marginY + static_cast<int>(std::size(keybindings)) *rowHeight+10;
+        CreateWindowW(L"BUTTON", L"Reset To Defaults", WS_CHILD | WS_VISIBLE, marginX, resetY, 150, 28, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(resetButtonId)), instance, nullptr);
+        return 0;
+      }
+      case WM_COMMAND: {
+        int id = LOWORD(wParam);
+        if(id == resetButtonId){
+          for(size_t i = 0; i < std::size(keybindings); i++){
+            *keybindings[i].keyVariable = keybindings[i].defaultValue;
+            SetWindowTextW(settingsValueLabels[i], VkCodeToName(keybindings[i].defaultValue).c_str());
+          }
+          SaveKeybindings();
+        }
+        else if(id >= rebindButtonIdBase && id < rebindButtonIdBase + static_cast<int>(std::size(keybindings))){
+          awaitingBindIndex = id - rebindButtonIdBase;
+          SetWindowTextW(settingsRebindButtons[awaitingBindIndex], L"Press a key...");
+          SetFocus(hwnd);
+        }
+        return 0;
+      }
+      case WM_KEYDOWN: {
+        if(awaitingBindIndex < 0) break;
+        int idx = awaitingBindIndex;
+        awaitingBindIndex = -1;
+        DWORD vk = static_cast<DWORD>(wParam);
+        if(vk == VK_SHIFT || vk == VK_CONTROL || vk == VK_MENU){
+          UINT scanCode = (static_cast<UINT>(lParam)>>16) & 0xFF;
+          bool isExtended =   (lParam & 0x01000000) != 0;
+          UINT specificVk = MapVirtualKeyW(scanCode | (isExtended ? 0xE000 : 0), MAPVK_VSC_TO_VK_EX);
+          if(specificVk != 0) vk = specificVk;
+        }
+        if(vk == VK_ESCAPE){
+          SetWindowTextW(settingsRebindButtons[idx], L"Rebind");
+          return 0;
+        }
+        if(vk >= 'A' && vk <= 'Z'){
+          MessageBoxW(hwnd, L"Letters are reserved for typing hints and cannot be rebound to an action.", L"Keybind Conflict", MB_OK | MB_ICONWARNING);
+          SetWindowTextW(settingsRebindButtons[idx], L"Rebind");
+          return 0;
+        }
+        for(size_t i = 0; i <std::size(keybindings); i++){
+          if(static_cast<int>(i) == idx) continue;
+          if(*keybindings[i].keyVariable == vk){
+            std::wstring msg = L"That key is already used for \"" + std::wstring(keybindings[i].actionLabel) + L"\".";
+            MessageBoxW(hwnd, msg.c_str(),  L"Keybind Conflict", MB_OK | MB_ICONWARNING);
+            SetWindowTextW(settingsRebindButtons[idx], L"Rebind");
+            return 0;
+          }
+        }
+        *keybindings[idx].keyVariable = vk;
+        SetWindowTextW(settingsValueLabels[idx], VkCodeToName(vk).c_str());
+        SetWindowTextW(settingsRebindButtons[idx], L"Rebind");
+        SaveKeybindings();
         return 0;
       }
       case WM_CLOSE:
@@ -598,8 +691,8 @@ namespace
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_BTNFACE+1);
     RegisterClassW(&wc);
-    constexpr int windowWidth = 20+220+10+140+20;
-    int windowHeight = 20*20+ static_cast<int>(std::size(keybindings)) *28+40;
+    constexpr int windowWidth = 20+220+10+140+20+90+20;
+    int windowHeight = 20*20+ static_cast<int>(std::size(keybindings)) *28+40+50;
     return CreateWindowW(settingsWindowClassName, L"Kap Keybinds", WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, CW_USEDEFAULT, CW_USEDEFAULT, windowWidth, windowHeight, nullptr, nullptr, instance, nullptr);
   }
   // Handle messages sent to overlay window including hotkey, painting, timers and destruction
@@ -705,6 +798,8 @@ int wmain(){
   }
 
   HINSTANCE mInstance = GetModuleHandleW(nullptr);
+  // load our key bindings
+  LoadKeybindings();
   // create our overlay
   HWND mOverlayHwnd = CreateOverlay(mInstance);
   if (!mOverlayHwnd)
